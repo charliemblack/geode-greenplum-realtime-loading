@@ -22,7 +22,7 @@ public class MicroBatcherConstants {
     public static final String PIPE_NAME = "pipeName";
     public static final String PIPE_FILE_LOCK = "pipeFileLock";
     public static final String EXT_TABLE_NAME = "externalTableName";
-    public static final String TABLE_NAME = "tablename";
+    public static final String TABLE_NAME = "tableName";
     public static final String APPEND_OPERATION = "appendOperation";
     public static final String PDX_FIELDS = "pdxFields";
     public static final String SEPARATOR_CHAR = "separatorChar";

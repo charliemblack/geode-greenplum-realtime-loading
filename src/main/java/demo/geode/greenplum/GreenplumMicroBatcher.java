@@ -22,8 +22,8 @@ import com.codahale.metrics.Timer;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.commons.lang.StringUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.geode.LogWriter;
+import org.apache.geode.cache.CacheFactory;
 import org.apache.geode.cache.Declarable;
 import org.apache.geode.cache.Operation;
 import org.apache.geode.cache.asyncqueue.AsyncEvent;
@@ -38,6 +38,7 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
@@ -58,7 +59,7 @@ import static demo.geode.greenplum.MicroBatcherConstants.*;
 public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
 
 
-    private static final Log LOG = LogFactory.getLog(GreenplumMicroBatcher.class);
+    private static final LogWriter LOG = CacheFactory.getAnyInstance().getLogger();
     private final MetricRegistry metrics = new MetricRegistry();
     private final Timer writeDuration = metrics.timer(name(GreenplumMicroBatcher.class, "writeDuration"));
     private final Histogram batchSize = metrics.histogram(name(GreenplumMicroBatcher.class, "batchSize"));
@@ -125,8 +126,8 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
                     stringBuffer.append('\n');
                     // Write the entire contents to the pipe
                     bufferedWriter.write(stringBuffer.toString());
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug("Send the following to GP : " + stringBuffer.toString());
+                    if (LOG.fineEnabled()) {
+                        LOG.fine("Send the following to GP : " + stringBuffer.toString());
                     }
                 }
             }
@@ -179,6 +180,9 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
 
     @Override
     public void init(Properties props) {
+        LOG.info(getClass().getSimpleName() + " initializing with the following properties");
+        writePropertiesToLog(props);
+
         setupConnectionPool(props);
 
 
@@ -191,6 +195,7 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
         LOG.info("PDX fields to send - " + temp);
         assert StringUtils.isNotEmpty(temp);
         pdxfields = temp.split(":");
+        LOG.info("PDX fields to send as an array in order - " + Arrays.toString(pdxfields));
         sqlText = "INSERT  INTO " + tableName + " SELECT  * from " + extTableName + " ;";
         LOG.info("The SQL command to execute to open the pipe is - " + sqlText);
         pipeFileLocation = props.getProperty(PIPE_FILE_LOCATION);
@@ -203,14 +208,14 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
         assert StringUtils.isNotEmpty(temp);
         try {
             File file = new File(temp);
-            file.mkdirs();
+            file.getParentFile().mkdirs();
             interprocessLock = new RandomAccessFile(file, "rw").getChannel();
         } catch (FileNotFoundException e) {
             LOG.error("Tried to create a file for locking. ");
             throw new RuntimeException(e);
         }
-        separatorChar = props.getProperty(SEPARATOR_CHAR, Integer.toString((int)'\t')).trim().charAt(0);
-        LOG.info("Using the following char as a separator char - " + ((int) separatorChar));
+        separatorChar = props.getProperty(SEPARATOR_CHAR, Integer.toString((int) '\t')).trim().charAt(0);
+        LOG.info("Using the following ascii char # as a separator char - " + ((int) separatorChar));
     }
 
     private void setupConnectionPool(Properties properties) {
@@ -226,11 +231,15 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
         //TODO - I shouldn't output the properties file since it will contain the DB user and password.
         // but for now I am ok with it.
         LOG.info("Connection Pool Properties:");
+        writePropertiesToLog(properties);
+        HikariConfig config = new HikariConfig(props);
+        dataSource = new HikariDataSource(config);
+    }
+
+    private void writePropertiesToLog(Properties properties) {
         properties.entrySet().forEach(entry -> {
             LOG.info("name: " + entry.getKey() + ", value: " + entry.getValue());
         });
-        HikariConfig config = new HikariConfig(props);
-        dataSource = new HikariDataSource(config);
     }
 
     private class TriggerRead implements Runnable {

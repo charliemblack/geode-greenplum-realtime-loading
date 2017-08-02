@@ -18,9 +18,9 @@ cd "`dirname \"$PRG\"`/.." >&-
 APP_HOME="`pwd -P`"
 cd "$SAVED" >&-
 
-DEFAULT_LOCATOR_MEMORY="--initial-heap=128m --max-heap=128m"
+DEFAULT_LOCATOR_MEMORY="128m"
 
-DEFAULT_SERVER_MEMORY="--initial-heap=1g --max-heap=1g"
+DEFAULT_SERVER_MEMORY="1g"
 
 DEFAULT_JVM_OPTS=" --J=-XX:+UseParNewGC"
 DEFAULT_JVM_OPTS="$DEFAULT_JVM_OPTS --J=-XX:+UseConcMarkSweepGC"
@@ -37,7 +37,7 @@ LOCATORS="localhost[10334],localhost[10335]"
 
 export MY_CLASSPATH=
 
-for file in ${APP_HOME}/../build/install/*/lib/*.jar
+for file in ${APP_HOME}/build/install/geode-greenplum-realtime-loading/lib/*.jar
 do
   export MY_CLASSPATH=$file:$MY_CLASSPATH
 done
@@ -63,7 +63,7 @@ function launchLocator() {
 
     mkdir -p ${APP_HOME}/data/locator$1
 
-    gfsh -e "start locator ${DEFAULT_LOCATOR_MEMORY} ${DEFAULT_JVM_OPTS} --name=locator$1_`hostname` --port=1033$1 --dir=${APP_HOME}/data/locator$1 --locators=${LOCATORS} " &
+    gfsh -e "start locator --initial-heap=${DEFAULT_LOCATOR_MEMORY} --max-heap=${DEFAULT_LOCATOR_MEMORY} ${DEFAULT_JVM_OPTS} --name=locator$1_`hostname` --port=1033$1 --dir=${APP_HOME}/data/locator$1 --locators=${LOCATORS} " &
 
 
 }
@@ -72,7 +72,7 @@ function launchServer() {
 
     mkdir -p ${APP_HOME}/data/server${1}
 
-    gfsh -e "connect --locator=${LOCATORS}" -e "start server ${DEFAULT_SERVER_MEMORY} ${DEFAULT_JVM_OPTS} --name=server${1}_`hostname` --dir=${APP_HOME}/data/server${1} ${STD_SERVER_ITEMS}" &
+    gfsh -e "connect --locator=${LOCATORS}" -e "start server --J=-Xmx${DEFAULT_SERVER_MEMORY} --J=-Xms${DEFAULT_SERVER_MEMORY} ${DEFAULT_JVM_OPTS} --name=server${1}_`hostname` --dir=${APP_HOME}/data/server${1} ${STD_SERVER_ITEMS}" &
 
 
 }

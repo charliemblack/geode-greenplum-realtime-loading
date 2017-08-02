@@ -20,6 +20,7 @@ ext {
     jdbcConnectionPoolVersion = '2.6.2'
     junitVersion = '4.12'
     metricsVersion = '3.2.3'
+    postgresVersion = '9.1-901-1.jdbc4'
 }
 
 repositories {
@@ -50,4 +51,5 @@ dependencies {
     compile "org.apache.geode:geode-wan:$geodeVersion"
     compile "com.zaxxer:HikariCP:$jdbcConnectionPoolVersion"
     compile "io.dropwizard.metrics:metrics-core:$metricsVersion"
+    compile "postgresql:postgresql:$postgresVersion"
 }
