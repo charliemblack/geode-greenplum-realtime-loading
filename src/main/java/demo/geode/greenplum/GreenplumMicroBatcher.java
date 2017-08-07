@@ -28,6 +28,8 @@ import org.apache.geode.cache.Declarable;
 import org.apache.geode.cache.Operation;
 import org.apache.geode.cache.asyncqueue.AsyncEvent;
 import org.apache.geode.cache.asyncqueue.AsyncEventListener;
+import org.apache.geode.internal.InternalDataSerializer;
+import org.apache.geode.internal.cache.GemFireCacheImpl;
 import org.apache.geode.pdx.PdxInstance;
 
 import javax.sql.DataSource;
@@ -35,7 +37,6 @@ import java.io.*;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.sql.Connection;
-import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
@@ -72,9 +73,12 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
     private char separatorChar = '\t';
     private boolean appendOperation = false;
     private String sqlText;
+    private boolean testMode = false;
+    private Properties initializationProperties;
 
     @Override
     public boolean processEvents(List<AsyncEvent> events) {
+
         FileLock fileLock = null;
         try {
             fileLock = interprocessLock.lock();
@@ -101,20 +105,28 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
     private boolean doProcessEvents(List<AsyncEvent> events) {
         // Everyone likes metrics - size of the data we are pushing
         batchSize.update(events.size());
-        // trigger the database to start listening on the pipe.
-        Future future = executorService.submit(new TriggerRead());
+
+        DataSource dataSource = getDataSource();
+        Future future = null;
+        if (dataSource != null) {
+            // trigger the database to start listening on the pipe.
+            future = executorService.submit(new TriggerRead());
+        }
         // Metric the time it takes to push the data.
         Timer.Context context = writeDuration.time();
         BufferedWriter bufferedWriter = null;
         try {
-            // We are sending the data over a pipe to the GPFDist process.    This is the fastest method to send data
-            // to greenplum in a binary fashion.
-            bufferedWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(pipeFileLocation)));
+            if (dataSource != null) {
+                // We are sending the data over a pipe to the GPFDist process.    This is the fastest method to send data
+                // to greenplum in a binary fashion.
+                bufferedWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(pipeFileLocation)));
+            }
             // Iterate over the contents of the batch
             for (AsyncEvent event : events) {
                 StringBuffer stringBuffer = null;
                 if (Operation.UPDATE.equals(event.getOperation()) || Operation.CREATE.equals(event.getOperation())) {
-                    PdxInstance pdxInstance = (PdxInstance) event.getDeserializedValue();
+                    byte[] blob = event.getSerializedValue();
+                    PdxInstance pdxInstance = InternalDataSerializer.readPdxInstance(blob, GemFireCacheImpl.getForPdx("some reason"));
                     stringBuffer = getText(pdxInstance);
                 }
                 //TODO what does it mean to delete.
@@ -124,16 +136,22 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
                     }
                     // Newline
                     stringBuffer.append('\n');
-                    // Write the entire contents to the pipe
-                    bufferedWriter.write(stringBuffer.toString());
+                    if (bufferedWriter != null) {
+                        // Write the entire contents to the pipe
+                        bufferedWriter.write(stringBuffer.toString());
+                    }
                     if (LOG.fineEnabled()) {
                         LOG.fine("Send the following to GP : " + stringBuffer.toString());
                     }
                 }
             }
-            bufferedWriter.flush();
+            if (bufferedWriter != null) {
+                bufferedWriter.flush();
+            }
             // lets make sure the SQL returns so we don't get the RDBMS in some whacky state.
-            future.get();
+            if (future != null) {
+                future.get();
+            }
         } catch (InterruptedException | ExecutionException | IOException e) {
             LOG.error("Couldn't write to the pipe ", e);
             throw new RuntimeException(e);
@@ -168,6 +186,9 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
                 } else {
                     buffer.append(value.toString());
                 }
+            } else {
+                //TODO make sure we want to write a null for a bogus field.
+                buffer.append("null");
             }
         }
         return buffer;
@@ -180,11 +201,17 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
 
     @Override
     public void init(Properties props) {
+        this.initializationProperties = new Properties();
+        props.entrySet().forEach(e -> {
+            initializationProperties.setProperty((String) e.getKey(), (String) e.getValue());
+        });
         LOG.info(getClass().getSimpleName() + " initializing with the following properties");
         writePropertiesToLog(props);
 
-        setupConnectionPool(props);
+        testMode = Boolean.parseBoolean(props.getProperty("TEST_MODE", Boolean.FALSE.toString()));
+        LOG.info("Using testing mode (true = no db connection will be made) - " + testMode);
 
+        setupConnectionPool(props);
 
         String tableName = props.getProperty(TABLE_NAME);
         LOG.info("Using table name - " + tableName);
@@ -214,8 +241,24 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
             LOG.error("Tried to create a file for locking. ");
             throw new RuntimeException(e);
         }
-        separatorChar = props.getProperty(SEPARATOR_CHAR, Integer.toString((int) '\t')).trim().charAt(0);
+        if (StringUtils.isNotEmpty(props.getProperty(SEPARATOR_CHAR))) {
+            separatorChar = props.getProperty(SEPARATOR_CHAR, "\t").charAt(0);
+        }
         LOG.info("Using the following ascii char # as a separator char - " + ((int) separatorChar));
+    }
+
+
+    private void writePropertiesToLog(Properties properties) {
+        properties.entrySet().forEach(entry -> {
+            LOG.info("name: " + entry.getKey() + ", value: " + entry.getValue());
+        });
+    }
+
+    protected DataSource getDataSource() {
+        if (dataSource == null && !testMode) {
+            setupConnectionPool(initializationProperties);
+        }
+        return dataSource;
     }
 
     private void setupConnectionPool(Properties properties) {
@@ -232,14 +275,13 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
         // but for now I am ok with it.
         LOG.info("Connection Pool Properties:");
         writePropertiesToLog(properties);
-        HikariConfig config = new HikariConfig(props);
-        dataSource = new HikariDataSource(config);
-    }
-
-    private void writePropertiesToLog(Properties properties) {
-        properties.entrySet().forEach(entry -> {
-            LOG.info("name: " + entry.getKey() + ", value: " + entry.getValue());
-        });
+        if (!testMode) {
+            HikariConfig config = new HikariConfig(props);
+            dataSource = new HikariDataSource(config);
+            LOG.info("Connected to db - " + config);
+        } else {
+            LOG.info("skipping connecting to db due to test mode == " + testMode);
+        }
     }
 
     private class TriggerRead implements Runnable {
@@ -248,9 +290,8 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
         public void run() {
             Connection connection = null;
             Statement sql;
-            DatabaseMetaData dbmd;
             try {
-                connection = dataSource.getConnection();
+                connection = getDataSource().getConnection();
                 sql = connection.createStatement();
                 sql.executeUpdate(sqlText);
             } catch (SQLException e) {
