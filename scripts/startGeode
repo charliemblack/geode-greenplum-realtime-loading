@@ -88,6 +88,8 @@ done
 # Only need to wait for one locator
 waitForPort 10334
 
+gfsh -e "connect --locator=${LOCATORS}" -e "configure pdx --read-serialized=true"
+
 for i in {1..3}
 do
 

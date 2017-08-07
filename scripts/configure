@@ -22,8 +22,6 @@ gfsh << EOF
 
 connect --locator=localhost[10334]
 
-configure pdx --read-serialized=true
-
 create async-event-queue --id=Table1 --parallel=true --enable-batch-conflation=false --batch-size=100000 --batch-time-interval=300000 --persistent=false  --disk-synchronous=false --forward-expiration-destroy=false --max-queue-memory=100 --dispatcher-threads=5 --order-policy=KEY --listener-param=connectionPoolProperties#${APP_HOME}/etc/jdbc.properties,pipeFileLocation#${APP_HOME}/data/pipefile,pipeName#pipName,pipeFileLock#${APP_HOME}/data/fileLock.lock,externalTableName#theExtTable,tableName#theTableName,pdxFields#field1:field2:fieldn,TEST_MODE#true --listener=demo.geode.greenplum.GreenplumMicroBatcher
 
 create region --name=Region1 --async-event-queue-id=Table1 --type=PARTITION_REDUNDANT --redundant-copies=1

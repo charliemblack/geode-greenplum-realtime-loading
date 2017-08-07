@@ -125,9 +125,7 @@ public class GreenplumMicroBatcher implements AsyncEventListener, Declarable {
             for (AsyncEvent event : events) {
                 StringBuffer stringBuffer = null;
                 if (Operation.UPDATE.equals(event.getOperation()) || Operation.CREATE.equals(event.getOperation())) {
-                    byte[] blob = event.getSerializedValue();
-                    PdxInstance pdxInstance = InternalDataSerializer.readPdxInstance(blob, GemFireCacheImpl.getForPdx("some reason"));
-                    stringBuffer = getText(pdxInstance);
+                    stringBuffer = getText((PdxInstance) event.getDeserializedValue());
                 }
                 //TODO what does it mean to delete.
                 if (stringBuffer != null) {
