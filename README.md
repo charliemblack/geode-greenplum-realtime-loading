@@ -14,4 +14,4 @@ For this project we are going to use pipes.   Pipes allow the sending process to
 
 Flow of data: As Geode is reacting to data requests it is capturing what has changed and is enqueueing those changes based on the policy the architect as chosen.   Geode will trigger the AEL based on policy.   That AEL then signals the GPFDist process to start listening on a pipe.   Geode then writes the contents of the queue to the pipe.  As GPFDist reads the data off of the pipe it routing the data to the correct Greenplum segment based on a policy setup in Greenplum.
 
-![Data Pipeline](/images/DataFlowDiagram.png)
+![Data Pipeline](/images/DataFlowDiagram.gif)
